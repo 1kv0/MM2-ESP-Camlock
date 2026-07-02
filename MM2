@@ -154,22 +154,33 @@ local function ClearGunDropVisuals()
     GunDropMarker = nil
 end
 
--- Optimized: Target only specific root directories instead of scanning all descendants
 local function FindDroppedGun()
-    local searchPool = {workspace:FindFirstChild("Normal"), workspace}
-    for _, container in ipairs(searchPool) do
-        if container then
-            for _, obj in ipairs(container:GetChildren()) do
-                if (obj.Name == "GunDrop" or obj.Name == "Gun") and (obj:IsA("BasePart") or obj:IsA("Model")) then
+    for _, obj in ipairs(workspace:GetChildren()) do
+        if (obj.Name == "GunDrop" or obj.Name == "Gun") and (obj:IsA("BasePart") or obj:IsA("Model")) then
+            local isHeld = false
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player.Character and obj:IsDescendantOf(player.Character) then
+                    isHeld = true
+                    break
+                end
+            end
+            if not isHeld and not obj:IsDescendantOf(Camera) then
+                return obj
+            end
+        end
+        
+        if obj:IsA("Folder") or obj:IsA("Model") then
+            for _, subObj in ipairs(obj:GetChildren()) do
+                if (subObj.Name == "GunDrop" or subObj.Name == "Gun") and (subObj:IsA("BasePart") or subObj:IsA("Model")) then
                     local isHeld = false
                     for _, player in ipairs(Players:GetPlayers()) do
-                        if player.Character and obj:IsDescendantOf(player.Character) then
+                        if player.Character and subObj:IsDescendantOf(player.Character) then
                             isHeld = true
                             break
                         end
                     end
-                    if not isHeld and not obj:IsDescendantOf(Camera) then
-                        return obj
+                    if not isHeld and not subObj:IsDescendantOf(Camera) then
+                        return subObj
                     end
                 end
             end
@@ -346,7 +357,11 @@ task.spawn(function()
     while true do
         if ESPEnabled then
             UpdatePlayerRoles()
-            CachedGunDrop = FindDroppedGun()
+            
+            -- Safe Check: If gun drop visual isn't mapped yet or it went missing, query the workspace tree.
+            if not CachedGunDrop or not CachedGunDrop.Parent then
+                CachedGunDrop = FindDroppedGun()
+            end
         else
             CachedGunDrop = nil
         end
@@ -373,7 +388,6 @@ RunService.RenderStepped:Connect(function(deltaTime)
                 local color = GetColor(player)
                 local head = player.Character:FindFirstChild("Head")
 
-                -- Performance Enhancement: Only change properties when necessary to prevent execution stutter
                 if data.highlight.Parent ~= player.Character then data.highlight.Parent = player.Character end
                 if data.highlight.FillColor ~= color then data.highlight.FillColor = color end
                 if data.highlight.OutlineColor ~= color then data.highlight.OutlineColor = color end
