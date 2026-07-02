@@ -9,26 +9,56 @@ local ESPEnabled = true
 local LockEnabled = false
 local CurrentTarget = nil 
 
+local UseStrictCamlock = false 
+
 local ProjectileSpeed = 1000 
-local MaxPredictionCap = 0.25 
+local MaxPredictionCap = 0.15 
 
 local ESP = {}
 local TargetHistory = {}
+local RoleCache = {}
+
+local GunDropMarker = nil
+local GunDropHighlight = nil
+local GunDropLabel = nil
 
 local LastSheriffPos = nil
-local SheriffMarker = nil
+local FallbackSheriffMarker = nil
 local HadSheriffBefore = false
 
+local AutoShootActive = false
+local AutoShootTimer = 0
+
+local function UpdatePlayerRoles()
+    local newRoles = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        local isSheriff = false
+        local isMurderer = false
+        
+        local char = player.Character
+        local bp = player:FindFirstChild("Backpack")
+        
+        if (bp and bp:FindFirstChild("Gun")) or (char and char:FindFirstChild("Gun")) then
+            isSheriff = true
+        end
+        
+        if (bp and bp:FindFirstChild("Knife")) or (char and char:FindFirstChild("Knife")) then
+            isMurderer = true
+        end
+        
+        newRoles[player] = {Sheriff = isSheriff, Murderer = isMurderer}
+    end
+    RoleCache = newRoles
+end
+
 local function IsSheriff(player)
-    local char = player.Character
-    local bp = player:FindFirstChild("Backpack")
-    return (bp and bp:FindFirstChild("Gun")) or (char and char:FindFirstChild("Gun"))
+    local data = RoleCache[player]
+    return data and data.Sheriff or false
 end
 
 local function IsMurderer(player)
-    local char = player.Character
-    local bp = player:FindFirstChild("Backpack")
-    return (bp and bp:FindFirstChild("Knife")) or (char and char:FindFirstChild("Knife"))
+    local data = RoleCache[player]
+    return data and data.Murderer or false
 end
 
 local function GetColor(player)
@@ -82,22 +112,84 @@ local function RemoveESP(player)
         LockEnabled = false
     end
     TargetHistory[player] = nil
+    RoleCache[player] = nil
+end
+
+local function CreateGunDropVisuals(gunDropInstance)
+    local yellowColor = Color3.fromRGB(255, 230, 0)
+
+    local highlight = Instance.new("Highlight")
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.FillColor = yellowColor
+    highlight.FillTransparency = 0.85 
+    highlight.OutlineColor = yellowColor
+    highlight.OutlineTransparency = 0
+    highlight.Adornee = gunDropInstance
+    highlight.Parent = gunDropInstance
+    GunDropHighlight = highlight
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Size = UDim2.new(0, 150, 0, 30)
+    billboard.StudsOffset = Vector3.new(0, 2, 0) 
+    billboard.AlwaysOnTop = true
+    billboard.Adornee = gunDropInstance
+    billboard.Parent = gunDropInstance
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.TextSize = 14
+    label.Font = Enum.Font.GothamBlack
+    label.TextColor3 = yellowColor
+    label.TextStrokeTransparency = 0.2
+    label.Parent = billboard
+    GunDropLabel = label
+
+    GunDropMarker = gunDropInstance
+end
+
+local function ClearGunDropVisuals()
+    if GunDropHighlight then GunDropHighlight:Destroy() GunDropHighlight = nil end
+    if GunDropLabel then GunDropLabel.Parent:Destroy() GunDropLabel = nil end 
+    GunDropMarker = nil
+end
+
+-- Optimized: Target only specific root directories instead of scanning all descendants
+local function FindDroppedGun()
+    local searchPool = {workspace:FindFirstChild("Normal"), workspace}
+    for _, container in ipairs(searchPool) do
+        if container then
+            for _, obj in ipairs(container:GetChildren()) do
+                if (obj.Name == "GunDrop" or obj.Name == "Gun") and (obj:IsA("BasePart") or obj:IsA("Model")) then
+                    local isHeld = false
+                    for _, player in ipairs(Players:GetPlayers()) do
+                        if player.Character and obj:IsDescendantOf(player.Character) then
+                            isHeld = true
+                            break
+                        end
+                    end
+                    if not isHeld and not obj:IsDescendantOf(Camera) then
+                        return obj
+                    end
+                end
+            end
+        end
+    end
+    return nil
 end
 
 local function GetSheriff()
     for _, p in ipairs(Players:GetPlayers()) do
-        if IsSheriff(p)
-            and p.Character
-            and p.Character:FindFirstChild("HumanoidRootPart") then
+        if IsSheriff(p) and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
             return p
         end
     end
     return nil
 end
 
-local function CreateMarker(pos)
-    if SheriffMarker then
-        SheriffMarker:Destroy()
+local function CreateFallbackMarker(pos)
+    if FallbackSheriffMarker then
+        FallbackSheriffMarker:Destroy()
     end
 
     local part = Instance.new("Part")
@@ -123,11 +215,11 @@ local function CreateMarker(pos)
     label.Font = Enum.Font.GothamBlack
     label.Parent = gui
 
-    SheriffMarker = part
+    FallbackSheriffMarker = part
 end
 
 local function GetBestAimPart(character)
-    return character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
+    return character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
 end
 
 local function GetClosestPlayerToCrosshair()
@@ -168,20 +260,40 @@ local function GetClosestPlayerToCrosshair()
     return bestTarget
 end
 
+local function GetMurdererPlayer()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and IsMurderer(player) and player.Character and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 then
+            return player
+        end
+    end
+    return nil
+end
+
+local function GetOtherSheriffPlayer()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and IsSheriff(player) and player.Character and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 then
+            return player
+        end
+    end
+    return nil
+end
+
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
 
-    if input.KeyCode == Enum.KeyCode.P  then
+    if input.KeyCode == Enum.KeyCode.P then
         ESPEnabled = not ESPEnabled
-        if not ESPEnabled and SheriffMarker then
-            SheriffMarker:Destroy()
-            SheriffMarker = nil
+        if not ESPEnabled then
+            ClearGunDropVisuals()
+            if FallbackSheriffMarker then
+                FallbackSheriffMarker:Destroy()
+                FallbackSheriffMarker = nil
+            end
         end
     end
 
     if input.KeyCode == Enum.KeyCode.Q then
         LockEnabled = not LockEnabled
-        
         if LockEnabled then
             CurrentTarget = GetClosestPlayerToCrosshair()
             if not CurrentTarget then
@@ -191,9 +303,67 @@ UserInputService.InputBegan:Connect(function(input, gp)
             CurrentTarget = nil
         end
     end
+
+    if input.KeyCode == Enum.KeyCode.E then
+        if IsSheriff(LocalPlayer) and LocalPlayer.Character then
+            local targetPlayer = GetMurdererPlayer() or GetOtherSheriffPlayer()
+            
+            if targetPlayer then
+                local gun = LocalPlayer.Character:FindFirstChild("Gun")
+                local internallyEquipped = true
+
+                if not gun then
+                    gun = LocalPlayer:FindFirstChild("Backpack") and LocalPlayer.Backpack:FindFirstChild("Gun")
+                    internallyEquipped = false
+                end
+
+                if gun then
+                    CurrentTarget = targetPlayer
+                    LockEnabled = true
+                    AutoShootActive = true
+                    AutoShootTimer = 1.0
+
+                    if internallyEquipped then
+                        if gun:IsA("Tool") then
+                            gun:Activate()
+                        end
+                    else
+                        gun.Parent = LocalPlayer.Character
+                        task.delay(0.1, function()
+                            if gun and gun:IsA("Tool") and gun.Parent == LocalPlayer.Character then
+                                gun:Activate()
+                            end
+                        end)
+                    end
+                end
+            end
+        end
+    end
+end)
+
+local CachedGunDrop = nil
+task.spawn(function()
+    while true do
+        if ESPEnabled then
+            UpdatePlayerRoles()
+            CachedGunDrop = FindDroppedGun()
+        else
+            CachedGunDrop = nil
+        end
+        task.wait(0.5)
+    end
 end)
 
 RunService.RenderStepped:Connect(function(deltaTime)
+
+    if AutoShootActive then
+        AutoShootTimer = AutoShootTimer - deltaTime
+        if AutoShootTimer <= 0 then
+            AutoShootActive = false
+            LockEnabled = false
+            CurrentTarget = nil
+        end
+    end
 
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and player.Character then
@@ -203,19 +373,20 @@ RunService.RenderStepped:Connect(function(deltaTime)
                 local color = GetColor(player)
                 local head = player.Character:FindFirstChild("Head")
 
-                data.highlight.Parent = player.Character
-                data.highlight.FillColor = color
-                data.highlight.OutlineColor = color
-                data.highlight.Enabled = ESPEnabled
+                -- Performance Enhancement: Only change properties when necessary to prevent execution stutter
+                if data.highlight.Parent ~= player.Character then data.highlight.Parent = player.Character end
+                if data.highlight.FillColor ~= color then data.highlight.FillColor = color end
+                if data.highlight.OutlineColor ~= color then data.highlight.OutlineColor = color end
+                if data.highlight.Enabled ~= ESPEnabled then data.highlight.Enabled = ESPEnabled end
 
                 if head then
-                    data.gui.Parent = head
-                    data.gui.Adornee = head
-                    data.gui.Enabled = ESPEnabled
+                    if data.gui.Parent ~= head then data.gui.Parent = head end
+                    if data.gui.Adornee ~= head then data.gui.Adornee = head end
+                    if data.gui.Enabled ~= ESPEnabled then data.gui.Enabled = ESPEnabled end
                 end
 
-                data.label.Text = player.Name
-                data.label.TextColor3 = color
+                if data.label.Text ~= player.Name then data.label.Text = player.Name end
+                if data.label.TextColor3 ~= color then data.label.TextColor3 = color end
 
                 if not TargetHistory[player] then
                     TargetHistory[player] = {pos = aimPart.Position, vel = Vector3.zero}
@@ -227,10 +398,8 @@ RunService.RenderStepped:Connect(function(deltaTime)
                         rawVelocity = previousData.vel
                     end
                     
-                    TargetHistory[player] = {
-                        pos = aimPart.Position,
-                        vel = previousData.vel:Lerp(rawVelocity, 0.25)
-                    }
+                    TargetHistory[player].pos = aimPart.Position
+                    TargetHistory[player].vel = previousData.vel:Lerp(rawVelocity, 0.15)
                 end
             end
         end
@@ -244,59 +413,95 @@ RunService.RenderStepped:Connect(function(deltaTime)
         if aimPart and humanoid and humanoid.Health > 0 and TargetHistory[CurrentTarget] then
             local currentCamPos = Camera.CFrame.Position
             local targetPos = aimPart.Position
-            
-            local distance = (targetPos - currentCamPos).Magnitude
-            local travelTime = distance / ProjectileSpeed
-            
-            local playerPing = LocalPlayer:GetNetworkPing()
-            local networkLatency = (playerPing > 0) and playerPing or 0.045
-            local predictionTime = travelTime + networkLatency
-            
-            predictionTime = math.min(predictionTime, MaxPredictionCap)
-            
-            local history = TargetHistory[CurrentTarget]
-            local horizontalVelocity = Vector3.new(history.vel.X, 0, history.vel.Z)
-            
-            if horizontalVelocity.Magnitude > 32 then
-                horizontalVelocity = horizontalVelocity.Unit * 16
+            local predictedPosition = targetPos
+
+            if not UseStrictCamlock then
+                local distance = (targetPos - currentCamPos).Magnitude
+                local travelTime = distance / ProjectileSpeed
+                
+                local playerPing = LocalPlayer:GetNetworkPing()
+                local networkLatency = (playerPing > 0) and playerPing or 0.03
+                
+                local predictionTime = (travelTime + networkLatency) * 0.35
+                predictionTime = math.min(predictionTime, MaxPredictionCap)
+                
+                local history = TargetHistory[CurrentTarget]
+                local horizontalVelocity = Vector3.new(history.vel.X, 0, history.vel.Z)
+                
+                if horizontalVelocity.Magnitude > 24 then
+                    horizontalVelocity = horizontalVelocity.Unit * 24
+                end
+                
+                predictedPosition = targetPos + (horizontalVelocity * predictionTime)
             end
             
-            local verticalPrediction = 0
-            if history.vel.Y > 3 then
-                verticalPrediction = history.vel.Y * predictionTime * 0.4
-            elseif history.vel.Y < -3 then
-                verticalPrediction = history.vel.Y * predictionTime * 0.15
-            end
-            
-            local predictedPosition = targetPos + (horizontalVelocity * predictionTime) + Vector3.new(0, verticalPrediction, 0)
-            
-            local targetCFrame = CFrame.new(currentCamPos, predictedPosition)
-            Camera.CFrame = Camera.CFrame:Lerp(targetCFrame, 0.12)
+            Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(currentCamPos, predictedPosition), 0.2)
         else
-            CurrentTarget = nil
-            LockEnabled = false
+            if not AutoShootActive then
+                CurrentTarget = nil
+                LockEnabled = false
+            end
         end
     end
 
-    local sheriff = GetSheriff()
+    if ESPEnabled then
+        local currentGunDrop = CachedGunDrop
 
-    if sheriff then
-        HadSheriffBefore = true
+        if currentGunDrop and currentGunDrop.Parent then
+            if FallbackSheriffMarker then
+                FallbackSheriffMarker:Destroy()
+                FallbackSheriffMarker = nil
+            end
 
-        local root = sheriff.Character:FindFirstChild("HumanoidRootPart")
-        if root then
-            LastSheriffPos = root.Position
-        end
+            if GunDropMarker ~= currentGunDrop then
+                ClearGunDropVisuals()
+                CreateGunDropVisuals(currentGunDrop)
+            end
 
-        if SheriffMarker then
-            SheriffMarker:Destroy()
-            SheriffMarker = nil
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                local myPos = LocalPlayer.Character.HumanoidRootPart.Position
+                local gunPos = currentGunDrop:IsA("Model") and currentGunDrop:GetPivot().Position or currentGunDrop.Position
+                local distance = math.round((gunPos - myPos).Magnitude)
+
+                if GunDropLabel then
+                    GunDropLabel.Text = string.format("[Gun] %d studs", distance)
+                end
+            else
+                if GunDropLabel then GunDropLabel.Text = "[Gun]" end
+            end
+            
+            if GunDropHighlight and not GunDropHighlight.Enabled then GunDropHighlight.Enabled = true end
+            if GunDropLabel and not GunDropLabel.Parent.Enabled then GunDropLabel.Parent.Enabled = true end
+        else
+            ClearGunDropVisuals()
+
+            local murdererAlive = GetMurdererPlayer()
+            if murdererAlive then
+                local sheriff = GetSheriff()
+                if sheriff then
+                    HadSheriffBefore = true
+                    local root = sheriff.Character:FindFirstChild("HumanoidRootPart")
+                    if root then
+                        LastSheriffPos = root.Position
+                    end
+                    if FallbackSheriffMarker then
+                        FallbackSheriffMarker:Destroy()
+                        FallbackSheriffMarker = nil
+                    end
+                else
+                    if HadSheriffBefore and LastSheriffPos then
+                        CreateFallbackMarker(LastSheriffPos)
+                    end
+                    HadSheriffBefore = false
+                end
+            else
+                if FallbackSheriffMarker then
+                    FallbackSheriffMarker:Destroy()
+                    FallbackSheriffMarker = nil
+                end
+                HadSheriffBefore = false
+            end
         end
-    else
-        if HadSheriffBefore and LastSheriffPos and ESPEnabled then
-            CreateMarker(LastSheriffPos)
-        end
-        HadSheriffBefore = false
     end
 end)
 
