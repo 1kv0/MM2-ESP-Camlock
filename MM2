@@ -1,3 +1,5 @@
+-- Made by @1kv0 on discord message if you need scripts like this made for your game of choice!
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -12,7 +14,7 @@ local CurrentTarget = nil
 local UseStrictCamlock = false 
 
 local ProjectileSpeed = 1000 
-local MaxPredictionCap = 0.15 
+local MaxPredictionCap = 0.25 
 
 local ESP = {}
 local TargetHistory = {}
@@ -230,7 +232,18 @@ local function CreateFallbackMarker(pos)
 end
 
 local function GetBestAimPart(character)
-    return character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
+    return character:FindFirstChild("HumanoidRootPart") 
+        or character:FindFirstChild("UpperTorso") 
+        or character:FindFirstChild("Torso")
+        or character:FindFirstChild("LeftHand")
+        or character:FindFirstChild("RightHand")
+        or character:FindFirstChild("LeftLowerArm")
+        or character:FindFirstChild("RightLowerArm")
+        or character:FindFirstChild("LeftUpperArm")
+        or character:FindFirstChild("RightUpperArm")
+        or character:FindFirstChild("LeftArm")
+        or character:FindFirstChild("RightArm")
+        or character:FindFirstChild("Head")
 end
 
 local function GetClosestPlayerToCrosshair()
@@ -332,20 +345,25 @@ UserInputService.InputBegan:Connect(function(input, gp)
                     CurrentTarget = targetPlayer
                     LockEnabled = true
                     AutoShootActive = true
-                    AutoShootTimer = 1.0
-
-                    if internallyEquipped then
-                        if gun:IsA("Tool") then
-                            gun:Activate()
-                        end
-                    else
-                        gun.Parent = LocalPlayer.Character
-                        task.delay(0.1, function()
-                            if gun and gun:IsA("Tool") and gun.Parent == LocalPlayer.Character then
+                    
+                    task.spawn(function()
+                        if internallyEquipped then
+                            -- Instant shoot path: Release camera tracking window immediately at 0.25s
+                            AutoShootTimer = 0.25
+                            task.wait(0.05)
+                            if gun and gun.Parent == LocalPlayer.Character and gun:IsA("Tool") then
                                 gun:Activate()
                             end
-                        end)
-                    end
+                        else
+                            -- Equip shoot path: Account for the 0.15s equip block, release tracking at 0.35s
+                            AutoShootTimer = 0.35
+                            gun.Parent = LocalPlayer.Character
+                            task.wait(0.15)
+                            if gun and gun.Parent == LocalPlayer.Character and gun:IsA("Tool") then
+                                gun:Activate()
+                            end
+                        end
+                    end)
                 end
             end
         end
@@ -358,7 +376,6 @@ task.spawn(function()
         if ESPEnabled then
             UpdatePlayerRoles()
             
-            -- Safe Check: If gun drop visual isn't mapped yet or it went missing, query the workspace tree.
             if not CachedGunDrop or not CachedGunDrop.Parent then
                 CachedGunDrop = FindDroppedGun()
             end
@@ -431,25 +448,30 @@ RunService.RenderStepped:Connect(function(deltaTime)
 
             if not UseStrictCamlock then
                 local distance = (targetPos - currentCamPos).Magnitude
-                local travelTime = distance / ProjectileSpeed
                 
-                local playerPing = LocalPlayer:GetNetworkPing()
-                local networkLatency = (playerPing > 0) and playerPing or 0.03
-                
-                local predictionTime = (travelTime + networkLatency) * 0.35
-                predictionTime = math.min(predictionTime, MaxPredictionCap)
-                
-                local history = TargetHistory[CurrentTarget]
-                local horizontalVelocity = Vector3.new(history.vel.X, 0, history.vel.Z)
-                
-                if horizontalVelocity.Magnitude > 24 then
-                    horizontalVelocity = horizontalVelocity.Unit * 24
+                if distance < 15 then
+                    predictedPosition = targetPos
+                else
+                    local balancedTravelTime = (distance / ProjectileSpeed) * 0.45
+                    
+                    local playerPing = LocalPlayer:GetNetworkPing()
+                    local networkLatency = (playerPing > 0) and playerPing or 0.03
+                    
+                    local predictionTime = networkLatency + balancedTravelTime
+                    predictionTime = math.min(predictionTime, MaxPredictionCap)
+                    
+                    local history = TargetHistory[CurrentTarget]
+                    local horizontalVelocity = Vector3.new(history.vel.X, 0, history.vel.Z)
+                    
+                    if horizontalVelocity.Magnitude > 24 then
+                        horizontalVelocity = horizontalVelocity.Unit * 24
+                    end
+                    
+                    predictedPosition = targetPos + (horizontalVelocity * predictionTime)
                 end
-                
-                predictedPosition = targetPos + (horizontalVelocity * predictionTime)
             end
             
-            Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(currentCamPos, predictedPosition), 0.2)
+            Camera.CFrame = CFrame.new(currentCamPos, predictedPosition)
         else
             if not AutoShootActive then
                 CurrentTarget = nil
