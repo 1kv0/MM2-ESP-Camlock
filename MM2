@@ -127,10 +127,7 @@ local function CreateMarker(pos)
 end
 
 local function GetBestAimPart(character)
-    return character:FindFirstChild("UpperTorso") 
-        or character:FindFirstChild("Torso") 
-        or character:FindFirstChild("HumanoidRootPart") 
-        or character:FindFirstChild("Head")
+    return character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
 end
 
 local function GetClosestPlayerToCrosshair()
@@ -199,23 +196,23 @@ end)
 RunService.RenderStepped:Connect(function(deltaTime)
 
     for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") then
+        if player ~= LocalPlayer and player.Character then
             local aimPart = GetBestAimPart(player.Character)
             if aimPart then
                 local data = CreateESP(player)
                 local color = GetColor(player)
+                local head = player.Character:FindFirstChild("Head")
 
-                local char = player.Character
-                local head = char.Head
-
-                data.highlight.Parent = char
+                data.highlight.Parent = player.Character
                 data.highlight.FillColor = color
                 data.highlight.OutlineColor = color
                 data.highlight.Enabled = ESPEnabled
 
-                data.gui.Parent = head
-                data.gui.Adornee = head
-                data.gui.Enabled = ESPEnabled
+                if head then
+                    data.gui.Parent = head
+                    data.gui.Adornee = head
+                    data.gui.Enabled = ESPEnabled
+                end
 
                 data.label.Text = player.Name
                 data.label.TextColor3 = color
@@ -248,15 +245,7 @@ RunService.RenderStepped:Connect(function(deltaTime)
             local currentCamPos = Camera.CFrame.Position
             local targetPos = aimPart.Position
             
-            local originPos = currentCamPos
-            if LocalPlayer.Character then
-                local hand = LocalPlayer.Character:FindFirstChild("RightHand") or LocalPlayer.Character:FindFirstChild("Right Arm")
-                if hand then
-                    originPos = hand.Position
-                end
-            end
-            
-            local distance = (targetPos - originPos).Magnitude
+            local distance = (targetPos - currentCamPos).Magnitude
             local travelTime = distance / ProjectileSpeed
             
             local playerPing = LocalPlayer:GetNetworkPing()
@@ -281,11 +270,8 @@ RunService.RenderStepped:Connect(function(deltaTime)
             
             local predictedPosition = targetPos + (horizontalVelocity * predictionTime) + Vector3.new(0, verticalPrediction, 0)
             
-            local toolOffsetVector = currentCamPos - originPos
-            local adjustedLookTarget = predictedPosition + (toolOffsetVector * 0.65)
-            
-            local targetCFrame = CFrame.new(currentCamPos, adjustedLookTarget)
-            Camera.CFrame = Camera.CFrame:Lerp(targetCFrame, 0.3)
+            local targetCFrame = CFrame.new(currentCamPos, predictedPosition)
+            Camera.CFrame = Camera.CFrame:Lerp(targetCFrame, 0.12)
         else
             CurrentTarget = nil
             LockEnabled = false
