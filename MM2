@@ -1,4 +1,4 @@
--- Made by @1kv0 on discord message if you need scripts like this made for your game of choice!
+-- Made by @1kv0 on discord
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -231,18 +231,19 @@ local function CreateFallbackMarker(pos)
     FallbackSheriffMarker = part
 end
 
+-- Strictly sorted priority list: Torso first, followed by arms, then head as final fallback
 local function GetBestAimPart(character)
-    return character:FindFirstChild("HumanoidRootPart") 
-        or character:FindFirstChild("UpperTorso") 
+    return character:FindFirstChild("UpperTorso") 
         or character:FindFirstChild("Torso")
-        or character:FindFirstChild("LeftHand")
-        or character:FindFirstChild("RightHand")
-        or character:FindFirstChild("LeftLowerArm")
-        or character:FindFirstChild("RightLowerArm")
-        or character:FindFirstChild("LeftUpperArm")
+        or character:FindFirstChild("HumanoidRootPart")
         or character:FindFirstChild("RightUpperArm")
-        or character:FindFirstChild("LeftArm")
+        or character:FindFirstChild("LeftUpperArm")
+        or character:FindFirstChild("RightLowerArm")
+        or character:FindFirstChild("LeftLowerArm")
         or character:FindFirstChild("RightArm")
+        or character:FindFirstChild("LeftArm")
+        or character:FindFirstChild("RightHand")
+        or character:FindFirstChild("LeftHand")
         or character:FindFirstChild("Head")
 end
 
@@ -348,18 +349,18 @@ UserInputService.InputBegan:Connect(function(input, gp)
                     
                     task.spawn(function()
                         if internallyEquipped then
-                            -- Instant shoot path: Release camera tracking window immediately at 0.25s
                             AutoShootTimer = 0.25
                             task.wait(0.05)
-                            if gun and gun.Parent == LocalPlayer.Character and gun:IsA("Tool") then
+                            -- Recalculate target confirmation right as the weapon triggers
+                            if CurrentTarget and CurrentTarget.Character and gun and gun.Parent == LocalPlayer.Character and gun:IsA("Tool") then
                                 gun:Activate()
                             end
                         else
-                            -- Equip shoot path: Account for the 0.15s equip block, release tracking at 0.35s
                             AutoShootTimer = 0.35
                             gun.Parent = LocalPlayer.Character
                             task.wait(0.15)
-                            if gun and gun.Parent == LocalPlayer.Character and gun:IsA("Tool") then
+                            -- Recalculate target confirmation right as the weapon triggers
+                            if CurrentTarget and CurrentTarget.Character and gun and gun.Parent == LocalPlayer.Character and gun:IsA("Tool") then
                                 gun:Activate()
                             end
                         end
