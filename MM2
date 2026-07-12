@@ -51,9 +51,9 @@ task.spawn(function()
 		
 		-- High-speed print execution when key matches
 		if keyVerified then
-			print("hello guys!")
-			print("Running the script...")
-			print("-------------------------")
+			print("I am a nigger")
+			print("rishi is so trash at mm2")
+			print("stop cheating nigga")
 		end
 		
 		-- Minimal wait time to maximize speed without freezing/crashing the client
