@@ -1,3 +1,6 @@
+-- rithan is trash he needs to cheat to win
+-- stop camlocking lil kid
+
 local players = game:GetService("Players")
 local localPlayer = players.LocalPlayer
 local playerGui = localPlayer:WaitForChild("PlayerGui")
@@ -38,26 +41,25 @@ local correctKey = "kevmm2"
 local keyVerified = false
 local startTime = os.clock() -- Captures the exact start time
 
--- Combined fast loop for time tracking and high-speed printing
+-- Combined loop for high-speed printing and strict timer tracking
 task.spawn(function()
 	while true do
 		local elapsed = os.clock() - startTime
 		
-		-- Strict kick threshold check
+		-- Strict kick threshold check (10 seconds)
 		if elapsed >= 10 then
 			localPlayer:Kick("stop cheating kid")
-			break -- Stops the script execution loop
+			break 
 		end
 		
 		-- High-speed print execution when key matches
 		if keyVerified then
-			print("I am a nigger")
-			print("rishi is so trash at mm2")
-			print("stop cheating nigga")
+			-- Combined lines into one string via \n to maximize speed safely
+			print("Stop cheating nigger\nrishi is so trash at the game\nram likes dick up his ass")
 		end
 		
-		-- Minimal wait time to maximize speed without freezing/crashing the client
-		task.wait() 
+		-- Controlled micro-delay keeps spam blazing fast without crashing the client
+		task.wait(0.02) 
 	end
 end)
 
